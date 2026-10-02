@@ -35,3 +35,6 @@ For each case,
 
 ## Explanation
 Clearly, connection pooling shows massive performance benefits. This is most likely due to the fact that one database connection handles multiple users; which saves the massive overhead of creating new connections each time.
+
+## Note on Generative AI Usage
+No generative AI has been used at any stage; including for debugging.
