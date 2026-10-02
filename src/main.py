@@ -1,5 +1,7 @@
 import psycopg, yaml, random, psycopg_pool
 from fastapi import FastAPI
+from sys import argv
+from contextlib import asynccontextmanager
 
 # config file related
 print("reading and setting up config file...")
@@ -13,11 +15,19 @@ try:
         config = yaml.safe_load(config_file)
 except FileNotFoundError:
     print("Config file does not exist, creating it...")
-    config = update_config({"db_exists": False, "password": "default"})
+    config = update_config({"db_exists": False, "password": argv[1]})
+
+# setup pool
+@asynccontextmanager
+async def lifespan(server: FastAPI):
+    server.state.pool = psycopg_pool.AsyncConnectionPool(f"dbname=postgres user=postgres password={config['password']}", min_size=5, max_size=None, open=False)
+    await server.state.pool.open()
+    yield
+    await server.state.pool.close()
 
 # setup server
 print("setting up server methods...")
-server = FastAPI()
+server = FastAPI(lifespan=lifespan)
 
 @server.get("/")
 async def root():
@@ -57,15 +67,13 @@ async def create_no_pooling(username:str) -> None:
 async def read_no_pooling(username:str) -> str:
     async with await psycopg.AsyncConnection.connect(f"dbname=postgres user=postgres password={config["password"]}") as async_conn:
         async with async_conn.cursor() as async_cursor:
-            await async_cursor.execute("SELECT id, username FROM users_task_one WHERE username=%s", (username))
-            await async_cursor.fetchone()
+            await async_cursor.execute("SELECT id, username FROM users_task_one WHERE username=%s", (username,))
             async for record in async_cursor:
                 print(record, type(record))
     return 'true'
 
 async def create_with_pooling(username:str) -> None:
-    async with psycopg_pool.AsyncConnectionPool(f"dbname=postgres user=postgres password={config["password"]}") as async_pool:
-        async with async_pool.connection() as async_conn:
-            async with async_conn.cursor() as async_cur:
-                await async_cur.execute("INSERT INTO users_task_one (id, username) VALUES (%s, %s)", (random.randint(0, 1023), username))
-                await async_conn.commit()
+    async with server.state.pool.connection() as async_conn:
+        async with async_conn.cursor() as async_cur:
+            await async_cur.execute("INSERT INTO users_task_one (id, username) VALUES (%s, %s)", (random.randint(0, 1023), username))
+            await async_conn.commit()
